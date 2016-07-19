@@ -4,6 +4,11 @@ require "fileutils"
 require "digest/sha1"
 require "time"
 
+# hack
+def inline_assets?
+  !ENV['SIMPLECOV_INLINE_ASSETS'].nil?
+end
+
 # Ensure we are using a compatible version of SimpleCov
 major, minor, patch = SimpleCov::VERSION.scan(/\d+/).first(3).map(&:to_i)
 if major < 0 || minor < 9 || patch < 0
@@ -15,8 +20,10 @@ module SimpleCov
   module Formatter
     class HTMLFormatter
       def format(result)
-        Dir[File.join(File.dirname(__FILE__), "../public/*")].each do |path|
-          FileUtils.cp_r(path, asset_output_path)
+        unless inline_assets?
+          Dir[File.join(File.dirname(__FILE__), '../public/*')].each do |path|
+            FileUtils.cp_r(path, asset_output_path)
+          end
         end
 
         File.open(File.join(output_path, "index.html"), "wb") do |file|
@@ -29,7 +36,7 @@ module SimpleCov
         "Coverage report generated for #{result.command_name} to #{output_path}. #{result.covered_lines} / #{result.total_lines} LOC (#{result.covered_percent.round(2)}%) covered."
       end
 
-    private
+      private
 
       # Returns the an erb instance for the template of given name
       def template(name)
@@ -47,11 +54,29 @@ module SimpleCov
         @asset_output_path
       end
 
+      def asset_path_or_inline(name)
+        inline_assets? ? asset_inline(name) : asset_path(name)
+      end
+
       def assets_path(name)
         File.join("./assets", SimpleCov::Formatter::HTMLFormatter::VERSION, name)
       end
 
-      # Returns the html for the given source_file
+      # hack
+      def asset_inline(name)
+        require 'sprockets'
+        assets = Sprockets::Environment.new File.expand_path('../..',__FILE__)
+        # from: ../Rakefile assets:compile
+        assets.append_path 'assets/javascripts'
+        assets.append_path 'assets/stylesheets'
+        # also add /public, needed for images
+        assets.append_path 'public'
+        asset = assets.find_asset(name, accept_encoding: 'base64')
+        throw "not found: #{name}" if asset.nil?
+        "data:#{asset.content_type};base64,#{Base64.strict_encode64 asset.to_s}"
+      end
+
+        # Returns the html for the given source_file
       def formatted_source_file(source_file)
         template("source_file").result(binding)
       end
@@ -108,3 +133,4 @@ end
 
 $LOAD_PATH.unshift(File.join(File.dirname(__FILE__)))
 require "simplecov-html/version"
+
